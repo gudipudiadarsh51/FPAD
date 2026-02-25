@@ -5,4 +5,4 @@ def compute_rps(foreground_cropped):
     rps_feat = FeatRPS()
     rps_value = rps_feat.rps(foreground_cropped)
 
-    return rps_value
+    return float(rps_value)

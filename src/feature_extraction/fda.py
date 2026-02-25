@@ -52,5 +52,6 @@ def compute_fda(img, mask,
     vals = np.array(vals, dtype=np.float64)
 
     return (
-        float(np.nanmean(vals))
+        float(np.nanmean(vals)),
+        float(np.nanstd(vals))
     )

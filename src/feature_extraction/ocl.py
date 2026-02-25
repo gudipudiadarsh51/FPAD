@@ -1,33 +1,34 @@
 from afqa_toolbox.features import FeatOCL, covcoef # type: ignore
 import numpy as np
 
-def compute_ocl(self, image, mask):
-        
-        H, W = image.shape
-        ocl_values = []
 
-        blk = self.ocl_blk_size
+def compute_ocl(image, mask,
+                blk_size=32,
+                foreground_ratio=0.8):
 
-        for r in range(0, H - blk + 1, blk):
-            for c in range(0, W - blk + 1, blk):
+    H, W = image.shape
+    ocl_values = []
 
-                block_mask = mask[r:r+blk, c:c+blk]
+    for r in range(0, H - blk_size + 1, blk_size):
+        for c in range(0, W - blk_size + 1, blk_size):
 
-                if block_mask.mean() >= self.foreground_ratio:
+            block_mask = mask[r:r+blk_size, c:c+blk_size]
 
-                    block = image[r:r+blk, c:c+blk]
+            if block_mask.mean() >= foreground_ratio:
 
-                    a, b, c_cov_val = covcoef(block, "c_diff_cv")
-                    val = FeatOCL.ocl_block(a, b, c_cov_val)
+                block = image[r:r+blk_size, c:c+blk_size]
 
-                    ocl_values.append(val)
+                a, b, c_cov_val = covcoef(block, "c_diff_cv")
+                val = FeatOCL.ocl_block(a, b, c_cov_val)
 
-        if len(ocl_values) == 0:
-            return 0.0, 0.0
+                ocl_values.append(val)
 
-        ocl_values = np.array(ocl_values, dtype=np.float64)
+    if len(ocl_values) == 0:
+        return 0.0, 0.0
 
-        return (
-            float(np.nanmean(ocl_values))
-        )
-   
+    ocl_values = np.array(ocl_values, dtype=np.float64)
+
+    return (
+        float(np.nanmean(ocl_values)),
+        float(np.nanstd(ocl_values))
+    )

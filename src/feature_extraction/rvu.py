@@ -53,5 +53,5 @@ def compute_rvu(img, mask,
 
     return (
         float(np.nanmean(vals)),
-        float(np.nanstd(vals))
+        float(np.nanstd(vals))  
     )

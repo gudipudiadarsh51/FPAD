@@ -70,25 +70,25 @@ class FeatureExtractor:
         # ------------------------------------------------------
 
         # Texture
-        gabor_mean = compute_gabor(foreground)
+        gabor,gabor_std = compute_gabor(foreground)
 
         # Orientation certainty
-        ocl_mean = compute_ocl(foreground, mask)
+        ocl,ocl_std = compute_ocl(foreground, mask)
 
         # Local clarity
-        lcs_mean = compute_lcs(foreground, mask)
+        lcs,lcs_std = compute_lcs(foreground, mask)
 
         # Orientation flow
-        ofl_mean = compute_ofl(foreground, mask)
+        ofl, ofl_std = compute_ofl(foreground, mask)
 
         # Frequency domain
-        fda_mean = compute_fda(foreground, mask)
+        fda, fda_std = compute_fda(foreground, mask)
 
         # Ridge–Valley uniformity
-        rvu_mean = compute_rvu(foreground, mask)
+        rvu,rvu_std = compute_rvu(foreground, mask)
 
         # Radial Power Spectrum
-        rps_value = compute_rps(foreground)
+        rps = compute_rps(foreground)
 
         #mean
         mean = compute_mean(foreground)
@@ -99,13 +99,21 @@ class FeatureExtractor:
         # ------------------------------------------------------
         # 4) Assemble feature vector
         # ------------------------------------------------------
+
         features = np.array([
-            gabor_mean,
-            ocl_mean,
-            lcs_mean, 
-            ofl_mean, 
-            fda_mean, 
-            rvu_mean, 
+            gabor,
+            gabor_std,
+            ocl,
+            ocl_std,
+            lcs,
+            lcs_std, 
+            ofl,
+            ofl_std, 
+            fda, 
+            fda_std,
+            rvu, 
+            rvu_std,
+            rps,
             mean,
             std
         ], dtype=np.float32)
@@ -120,4 +128,4 @@ class FeatureExtractor:
         Returns a zero feature vector if extraction fails.
         Keeps pipeline stable.
         """
-        return np.zeros(11, dtype=np.float32)
+        return np.zeros(15, dtype=np.float32)

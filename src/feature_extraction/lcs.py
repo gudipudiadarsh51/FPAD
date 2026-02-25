@@ -91,5 +91,5 @@ def compute_lcs(img, mask,
 
     # Summary statistics
     lcs_mean = float(np.nanmean(result))
-
-    return lcs_mean
+    lcs_std = float(np.nanstd(result))
+    return lcs_mean, lcs_std

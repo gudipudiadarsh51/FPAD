@@ -45,4 +45,5 @@ def compute_ofl(img, mask,
 
     return (
         float(np.nanmean(ofl_map)),
+        float(np.nanstd(ofl_map))
     )
