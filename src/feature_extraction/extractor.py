@@ -13,7 +13,7 @@ import numpy as np
 
 from src.preprocessing.preprocessing import extract_foreground
 from .gabor import compute_gabor
-from .ocl import compute_ocl
+from .ocl import compute_ocl                        
 from .lcs import compute_lcs
 from .ofl import compute_ofl
 from .fda import compute_fda
@@ -22,6 +22,23 @@ from .rps import compute_rps
 from .mean import compute_mean
 from .std import compute_std
 
+feature_cols = [
+            'gabor',
+            'gabor_std',
+            'ocl',
+            'ocl_std',
+            'lcs',
+            'lcs_std', 
+            'ofl',
+            'ofl_std', 
+            'fda', 
+            'fda_std',
+            'rvu', 
+            'rvu_std',
+            'rps',
+            'mean',
+            'std'
+        ]
 
 class FeatureExtractor:
     """
@@ -34,7 +51,7 @@ class FeatureExtractor:
     # ==========================================================
     # Main API
     # ==========================================================
-    def extract(self, image):
+    def extract(self,image: np.ndarray, config: dict) -> np.ndarray:
         """
         Extract all fingerprint quality features from one image.
 
@@ -68,57 +85,39 @@ class FeatureExtractor:
         # ------------------------------------------------------
         # 3) Compute features
         # ------------------------------------------------------
-
+        features = []
         # Texture
-        gabor,gabor_std = compute_gabor(foreground)
+        features.append(compute_gabor(foreground, config=config))
 
         # Orientation certainty
-        ocl,ocl_std = compute_ocl(foreground, mask)
+        features.append(compute_ocl(foreground, mask, config=config))
 
         # Local clarity
-        lcs,lcs_std = compute_lcs(foreground, mask)
+        features.append(compute_lcs(foreground, mask,config=config))
 
         # Orientation flow
-        ofl, ofl_std = compute_ofl(foreground, mask)
+        features.append(compute_ofl(foreground, mask, config=config))
 
         # Frequency domain
-        fda, fda_std = compute_fda(foreground, mask)
+        features.append(compute_fda(foreground, mask, config=config))
 
         # Ridge–Valley uniformity
-        rvu,rvu_std = compute_rvu(foreground, mask)
+        features.append(compute_rvu(foreground, mask, config=config))
 
         # Radial Power Spectrum
-        rps = compute_rps(foreground)
+        features.append(compute_rps(foreground, config=config))
 
         #mean
-        mean = compute_mean(foreground)
+        features.append(compute_mean(foreground))
 
         #std
-        std = compute_std(foreground)
+        features.append(compute_std(foreground))
 
         # ------------------------------------------------------
         # 4) Assemble feature vector
         # ------------------------------------------------------
 
-        features = np.array([
-            gabor,
-            gabor_std,
-            ocl,
-            ocl_std,
-            lcs,
-            lcs_std, 
-            ofl,
-            ofl_std, 
-            fda, 
-            fda_std,
-            rvu, 
-            rvu_std,
-            rps,
-            mean,
-            std
-        ], dtype=np.float32)
-
-        return features
+        return np.array(features, dtype=np.float32)
 
     # ==========================================================
     # Fallback (if segmentation fails)

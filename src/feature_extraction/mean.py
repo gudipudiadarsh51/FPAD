@@ -1,6 +1,6 @@
 import numpy as np
 
-def compute_mean(foreground_cropped):
+def compute_mean(foreground_cropped: np.ndarray) -> float:
     img_float = foreground_cropped.astype(np.float64)                 # Mean
 
     # Mean intensity

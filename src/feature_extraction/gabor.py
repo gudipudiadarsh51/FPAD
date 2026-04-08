@@ -3,19 +3,19 @@ import cv2
 from afqa_toolbox.features import FeatGabor # type: ignore
 
 
-def compute_gabor(image):
+def compute_gabor(image: np.ndarray, config: dict) -> tuple:
         
     gabor_feat = FeatGabor(
-        blk_size=16,
-        sigma=6,
-        freq=0.1,
-        angle_num=8
+        blk_size=config['blk_size'],
+        sigma=config['gabor_sigma'],
+        freq=config['gabor_freq'],
+        angle_num=config['gabor_angle_num']
     )
 
     std_map = gabor_feat.gabor_stds(
         image,
-        smooth=False,
-        shen=False
+        smooth=True,
+        shen=True
     )
 
     if std_map is None or std_map.size == 0:

@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-
+import pandas as pd
 
 def extract_foreground(gray):
     """
@@ -80,3 +80,12 @@ def extract_foreground(gray):
     mask_cropped = mask[ymin:ymax+1, xmin:xmax+1]
 
     return foreground_cropped, mask_cropped
+
+def load_dataset()-> tuple[pd.DataFrame, pd.Series]:
+    fake_df =pd.read_csv("/Users/adarshgudipudi/Desktop/FPAD/FPAD/src/data/features_fake.csv")
+    real_df = pd.read_csv("/Users/adarshgudipudi/Desktop/FPAD/FPAD/src/data/features_live.csv") 
+    df = pd.concat([fake_df, real_df], ignore_index=True)
+    X=df.drop(columns=['label','filename'])
+    y=df['label']
+    return X, y
+
