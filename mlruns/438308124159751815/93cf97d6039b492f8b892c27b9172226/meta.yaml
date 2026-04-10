@@ -1,0 +1,14 @@
+artifact_uri: /Users/adarshgudipudi/Desktop/FPAD/FPAD/mlruns/438308124159751815/93cf97d6039b492f8b892c27b9172226/artifacts
+end_time: 1775777257689
+entry_point_name: ''
+experiment_id: '438308124159751815'
+lifecycle_stage: active
+run_id: 93cf97d6039b492f8b892c27b9172226
+run_name: final_tabnet
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1775777249085
+status: 3
+tags: []
+user_id: adarshgudipudi

@@ -12,13 +12,16 @@ from afqa_toolbox.features import ( # type: ignore
 # from your_library import FeatLCS
 
 
-def compute_lcs(img: np.ndarray, mask: np.ndarray,
-                config: dict) -> tuple[float, float]:
+def compute_lcs(img, mask,
+                blk_size=64,
+                v1sz_x=64,
+                v1sz_y=16,
+                foreground_ratio=0.8):
 
     rows, cols = img.shape
 
     blk_offset, map_rows, map_cols = slanted_block_properties(
-        img.shape, config['blk_size'], config['v1sz_x'], config['v1sz_y']
+        img.shape, blk_size, v1sz_x, v1sz_y
     )
 
     result = np.full((map_rows, map_cols), np.nan, dtype=np.float64)
@@ -41,33 +44,33 @@ def compute_lcs(img: np.ndarray, mask: np.ndarray,
     )
 
     br = 0
-    for r in range(blk_offset, (blk_offset + rows) - config['blk_size'] - 1, config['blk_size']):
+    for r in range(blk_offset, (blk_offset + rows) - blk_size - 1, blk_size):
 
         bc = 0
-        for c in range(blk_offset, (blk_offset + cols) - config['blk_size'] - 1, config['blk_size']):
+        for c in range(blk_offset, (blk_offset + cols) - blk_size - 1, blk_size):
 
-            patch = b_img[r:r+config['blk_size'], c:c+config['blk_size']]
-            m     = b_mask[r:r+config['blk_size'], c:c+config['blk_size']]
+            patch = b_img[r:r+blk_size, c:c+blk_size]
+            m     = b_mask[r:r+blk_size, c:c+blk_size]
 
-            if m.mean() >= config['foreground_ratio']:
+            if m.mean() >= foreground_ratio:
 
                 cova, covb, covc = covcoef(patch, "c_diff_cv")
                 theta = orient(cova, covb, covc)
 
                 blkwim = b_img[
-                    r-blk_offset:r+config['blk_size']+blk_offset,
-                    c-blk_offset:c+config['blk_size']+blk_offset
+                    r-blk_offset:r+blk_size+blk_offset,
+                    c-blk_offset:c+blk_size+blk_offset
                 ]
 
                 val_a = FeatLCS.lcs_block(
                     blkwim, theta,
-                    config['v1sz_x'], config['v1sz_y'],
+                    v1sz_x, v1sz_y,
                     pad=False
                 )
 
                 val_b = FeatLCS.lcs_block(
                     blkwim, theta + np.pi/2.0,
-                    config['v1sz_x'], config['v1sz_y'],
+                    v1sz_x, v1sz_y,
                     pad=False
                 )
 

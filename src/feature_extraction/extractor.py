@@ -9,7 +9,7 @@ import numpy as np
 # src/feature_extraction/extractor.py
 
 import cv2
-import numpy as np
+import pandas as pd
 
 from src.preprocessing.preprocessing import extract_foreground
 from .gabor import compute_gabor
@@ -22,109 +22,162 @@ from .rps import compute_rps
 from .mean import compute_mean
 from .std import compute_std
 
-feature_cols = [
-            'gabor',
-            'gabor_std',
-            'ocl',
-            'ocl_std',
-            'lcs',
-            'lcs_std', 
-            'ofl',
-            'ofl_std', 
-            'fda', 
-            'fda_std',
-            'rvu', 
-            'rvu_std',
-            'rps',
-            'mean',
-            'std'
-        ]
+"""
+feature_extractor.py
+Wraps all your individual feature scripts into one unified extractor.
+Accepts a config dict so hyperparameters can be varied per Optuna trial.
 
-class FeatureExtractor:
+All feature functions return np.array([mean, std]).
+FeatGabor is instantiated with hyperparams then called via .extract(img, mask).
+"""
+
+
+from typing import List, Tuple
+from joblib import Parallel, delayed
+
+#extract_foreground
+# ── Canonical output column order ─────────────────────────────────────────────
+FEATURE_COLS = [
+    'gabor',  'gabor_std',
+    'ocl',    'ocl_std',
+    'lcs',    'lcs_std',
+    'fda',    'fda_std',
+    'rvu',    'rvu_std',
+    'rps',
+    'mean',   'std',
+    'ofl',    'ofl_std',
+]
+
+
+def extract_one(img: np.ndarray, mask: np.ndarray, config: dict) -> dict:
     """
-    Combines all feature modules into a single feature vector.
+    Run all feature scripts on a single (img, mask) pair using config.
+
+    Parameters
+    ----------
+    img   : uint8 grayscale numpy array
+    mask  : binary uint8 numpy array, same shape as img
+    config: dict from build_config() — contains all hyperparameter values
+
+    Returns
+    -------
+    dict mapping feature name → float value
     """
+    features = {}
+    fg = config['foreground_ratio']
 
-    def __init__(self):
-        pass  # Add reusable objects here if needed
+    # ── Gabor ─────────────────────────────────────────────────────────────────
+    # FeatGabor is a class — instantiate with hyperparams, then call .extract()
+    gabor_arr    = compute_gabor(img,
+        blk_size  = config['gabor_blk_size'],
+        sigma     = config['gabor_sigma'],
+        freq      = config['gabor_freq'],
+        angle_num = config['gabor_angle_num'],
+    )
+    #gabor_arr = gabor_o.extract(img, mask)   # returns np.array([mean, std])
+    features['gabor']     = float(gabor_arr[0])
+    features['gabor_std'] = float(gabor_arr[1])
 
-    # ==========================================================
-    # Main API
-    # ==========================================================
-    def extract(self,image: np.ndarray, config: dict) -> np.ndarray:
-        """
-        Extract all fingerprint quality features from one image.
+    # ── OCL ───────────────────────────────────────────────────────────────────
+    ocl_arr = compute_ocl(
+        img, mask,
+        blk_size         = config['ocl_ofl_blk_size'],
+        foreground_ratio = fg,
+    )
+    features['ocl']     = float(ocl_arr[0])
+    features['ocl_std'] = float(ocl_arr[1])
 
-        Parameters
-        ----------
-        image : np.ndarray (BGR or grayscale)
+    # ── OFL ───────────────────────────────────────────────────────────────────
+    ofl_arr = compute_ofl(
+        img, mask,
+        blk_size         = config['ocl_ofl_blk_size'],
+        foreground_ratio = fg,
+    )
+    features['ofl']     = float(ofl_arr[0])
+    features['ofl_std'] = float(ofl_arr[1])
 
-        Returns
-        -------
-        features : np.ndarray (float32)
-            Final feature vector
-        """
+    # ── FDA ───────────────────────────────────────────────────────────────────
+    fda_arr = compute_fda(
+        img, mask,
+        blk_size         = config['shared_blk_size'],
+        v1sz_x           = config['v1sz_x'],    # == shared_blk_size
+        v1sz_y           = config['v1sz_y'],
+        foreground_ratio = fg,
+    )
+    features['fda']     = float(fda_arr[0])
+    features['fda_std'] = float(fda_arr[1])
 
-        # ------------------------------------------------------
-        # 1) Convert to grayscale
-        # ------------------------------------------------------
-        if len(image.shape) == 3:
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        else:
-            gray = image
+    # ── LCS ───────────────────────────────────────────────────────────────────
+    lcs_arr = compute_lcs(
+        img, mask,
+        blk_size         = config['shared_blk_size'],
+        v1sz_x           = config['v1sz_x'],
+        v1sz_y           = config['v1sz_y'],
+        foreground_ratio = fg,
+    )
+    features['lcs']     = float(lcs_arr[0])
+    features['lcs_std'] = float(lcs_arr[1])
 
-        # ------------------------------------------------------
-        # 2) Foreground segmentation
-        # ------------------------------------------------------
-        foreground, mask = extract_foreground(gray)
+    # ── RVU ───────────────────────────────────────────────────────────────────
+    rvu_arr = compute_rvu(
+        img, mask,
+        blk_size         = config['shared_blk_size'],
+        v1sz_x           = config['v1sz_x'],
+        v1sz_y           = config['v1sz_y'],
+        foreground_ratio = fg,
+    )
+    features['rvu']     = float(rvu_arr[0])
+    features['rvu_std'] = float(rvu_arr[1])
 
-        # Safety check
-        if foreground is None or mask is None:
-            return self._empty_feature_vector()
+    # ── RPS (placeholder — uncomment and adapt when ready) ───────────────────
+    rps_arr= compute_rps(img)
+    features['rps'] = float(rps_arr)   # remove once rps is wired in
 
-        # ------------------------------------------------------
-        # 3) Compute features
-        # ------------------------------------------------------
-        features = []
-        # Texture
-        features.append(compute_gabor(foreground, config=config))
+    # ── Global stats (no hyperparameters) ────────────────────────────────────
+    features['mean'] = float(img.mean())
+    features['std']  = float(img.std())
 
-        # Orientation certainty
-        features.append(compute_ocl(foreground, mask, config=config))
+    return features
 
-        # Local clarity
-        features.append(compute_lcs(foreground, mask,config=config))
 
-        # Orientation flow
-        features.append(compute_ofl(foreground, mask, config=config))
+def extract_dataset(
+    pairs:  List[Tuple[np.ndarray, np.ndarray]],
+    config: dict,
+    n_jobs: int = -1,
+) -> pd.DataFrame:
+    """
+    Extract features for all (img, mask) pairs in parallel.
 
-        # Frequency domain
-        features.append(compute_fda(foreground, mask, config=config))
+    Parameters
+    ----------
+    pairs  : list of (img, mask) tuples from preprocessor.load_dataset()
+    config : hyperparameter config dict from build_config()
+    n_jobs : parallelism (-1 = all cores, 1 = serial for debugging)
 
-        # Ridge–Valley uniformity
-        features.append(compute_rvu(foreground, mask, config=config))
+    Returns
+    -------
+    pd.DataFrame with columns = FEATURE_COLS, one row per image
+    """
+    rows = Parallel(n_jobs=n_jobs, prefer='threads')(
+        delayed(extract_one)(img, mask, config)
+        for img, mask in pairs
+    )
 
-        # Radial Power Spectrum
-        features.append(compute_rps(foreground, config=config))
+    df = pd.DataFrame(rows)
 
-        #mean
-        features.append(compute_mean(foreground))
+    # Ensure canonical column order, add missing cols as NaN
+    for col in FEATURE_COLS:
+        if col not in df.columns:
+            print(f"Warning: feature '{col}' missing — check script return format")
+            df[col] = np.nan
 
-        #std
-        features.append(compute_std(foreground))
+    df = df[FEATURE_COLS]
 
-        # ------------------------------------------------------
-        # 4) Assemble feature vector
-        # ------------------------------------------------------
+    # Clean NaN / Inf that can arise from empty foreground blocks
+    n_bad = df.isnull().sum().sum() + np.isinf(df.values).sum()
+    if n_bad > 0:
+        print(f"Warning: {int(n_bad)} NaN/Inf values — replacing with column median")
+        df = df.replace([np.inf, -np.inf], np.nan)
+        df = df.fillna(df.median())
 
-        return np.array(features, dtype=np.float32)
-
-    # ==========================================================
-    # Fallback (if segmentation fails)
-    # ==========================================================
-    def _empty_feature_vector(self):
-        """
-        Returns a zero feature vector if extraction fails.
-        Keeps pipeline stable.
-        """
-        return np.zeros(15, dtype=np.float32)
+    return df
