@@ -1,58 +1,23 @@
 import numpy as np
 from afqa_toolbox.features import covcoef, orient, FeatRVU # type: ignore
-
+from .helper import _finalize
 # from your_library import FeatRVU
 
 
-def compute_rvu(img, mask,
-                blk_size=64,
-                v1sz_x=64,
-                v1sz_y=16,
-                foreground_ratio=0.8):
+def compute_rvu(img, mask, **kwargs):
 
-    H, W = img.shape
-    rows = H // blk_size
-    cols = W // blk_size
+    blk_size = kwargs.get('shared_blk_size', 32)
+    v1sz_x = min(kwargs.get('v1sz_x', blk_size), blk_size)
+    v1sz_y = min(kwargs.get('v1sz_y', blk_size // 2), blk_size)
+    foreground_ratio = kwargs.get('foreground_ratio', 0.8)
 
-    rvu_map = np.full((rows, cols), np.nan, dtype=np.float64)
-    vals = []
+    if mask is None:
+        mask=np.ones_like(img, dtype=np.uint8)
+    
+    feat = FeatRVU(blk_size=blk_size, v1sz_x=v1sz_x, v1sz_y=v1sz_y,foreground_ratio=foreground_ratio)  # Initialize the feature extractor
+    rvu_map = feat.rvu(img, mask)  # Compute the RVU standard deviation map
 
-    br = 0
-    for r in range(0, H - blk_size + 1, blk_size):
-
-        bc = 0
-        for c in range(0, W - blk_size + 1, blk_size):
-
-            block_mask = mask[r:r+blk_size, c:c+blk_size]
-
-            if block_mask.mean() >= foreground_ratio:
-
-                block = img[r:r+blk_size, c:c+blk_size]
-
-                a, b, c_cov_val = covcoef(block, "c_diff_cv")
-                theta = orient(a, b, c_cov_val)
-
-                val = FeatRVU.rvu_block(
-                    block,
-                    theta,
-                    v1sz_x,
-                    v1sz_y,
-                    pad=False
-                )
-
-                rvu_map[br, bc] = val
-                vals.append(val)
-
-            bc += 1
-        br += 1
-
-    if len(vals) == 0:
-        return 0.0, 0.0
-
-    vals = np.array(vals, dtype=np.float64)
-
-    return (
-        float(np.nanmean(vals)),
-        float(np.nanstd(vals))  
-    )
-
+   
+    
+    return _finalize(rvu_map, mask)
+    

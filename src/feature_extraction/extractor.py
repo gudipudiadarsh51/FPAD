@@ -1,19 +1,13 @@
-""" Main fingerprint feature extraction pipeline."""
-import afqa_toolbox as at # type: ignore
-from afqa_toolbox.features import FeatFDA, FeatGabor, FeatOCL # type: ignore
-import pkgutil
-import inspect
-import sys
+from importlib.resources import path
+
 import numpy as np
-
-# src/feature_extraction/extractor.py
-
-import cv2
 import pandas as pd
+from typing import List, Tuple
+from joblib import Parallel, delayed
+from src.enhance import enhance_image
 
-from src.preprocessing.preprocessing import extract_foreground
 from .gabor import compute_gabor
-from .ocl import compute_ocl                        
+from .ocl import compute_ocl
 from .lcs import compute_lcs
 from .ofl import compute_ofl
 from .fda import compute_fda
@@ -21,143 +15,135 @@ from .rvu import compute_rvu
 from .rps import compute_rps
 from .mean import compute_mean
 from .std import compute_std
-
-"""
-feature_extractor.py
-Wraps all your individual feature scripts into one unified extractor.
-Accepts a config dict so hyperparameters can be varied per Optuna trial.
-
-All feature functions return np.array([mean, std]).
-FeatGabor is instantiated with hyperparams then called via .extract(img, mask).
-"""
+from .rdi import compute_rdi
+from .s3pg import compute_s3pg
+from .sep import compute_sep
+from .mow import compute_mow
+from .acut import compute_acut
+from .sf import compute_sf
 
 
-from typing import List, Tuple
-from joblib import Parallel, delayed
 
-#extract_foreground
-# ── Canonical output column order ─────────────────────────────────────────────
 FEATURE_COLS = [
-    'gabor',  'gabor_std',
-    'ocl',    'ocl_std',
-    'lcs',    'lcs_std',
-    'fda',    'fda_std',
-    'rvu',    'rvu_std',
-    'rps',
-    'mean',   'std',
-    'ofl',    'ofl_std',
+    'gabor','gabor_std',
+    'ocl','ocl_std',
+    'lcs','lcs_std',
+    'fda','fda_std',
+    'rvu','rvu_std',
+    'rps','rps_std',
+    'mean','mean_std',
+    'std','std_std',
+    'ofl','ofl_std',
+    'rdi','rdi_std',
+    's3pg','s3pg_std',
+    'sep','sep_std',
+    'mow','mow_std',
+    'acut','acut_std',
+    'sf','sf_std'
 ]
 
 
 def extract_one(img: np.ndarray, mask: np.ndarray, config: dict) -> dict:
-    """
-    Run all feature scripts on a single (img, mask) pair using config.
-
-    Parameters
-    ----------
-    img   : uint8 grayscale numpy array
-    mask  : binary uint8 numpy array, same shape as img
-    config: dict from build_config() — contains all hyperparameter values
-
-    Returns
-    -------
-    dict mapping feature name → float value
-    """
     features = {}
     fg = config['foreground_ratio']
 
-    # ── Gabor ─────────────────────────────────────────────────────────────────
-    # FeatGabor is a class — instantiate with hyperparams, then call .extract()
-    gabor_arr    = compute_gabor(img,
-        blk_size  = config['gabor_blk_size'],
-        sigma     = config['gabor_sigma'],
-        freq      = config['gabor_freq'],
-        angle_num = config['gabor_angle_num'],
-    )
-    #gabor_arr = gabor_o.extract(img, mask)   # returns np.array([mean, std])
-    features['gabor']     = float(gabor_arr[0])
-    features['gabor_std'] = float(gabor_arr[1])
-
-    # ── OCL ───────────────────────────────────────────────────────────────────
-    ocl_arr = compute_ocl(
+    #enhance the image
+    img = enhance_image(img)
+    # ── Gabor ─────────────────────────────────────────────
+    gabor = compute_gabor(
         img, mask,
-        blk_size         = config['ocl_ofl_blk_size'],
-        foreground_ratio = fg,
+        gabor_blk_size=config['gabor_blk_size'],
+        gabor_sigma=config['gabor_sigma'],
+        gabor_freq=config['gabor_freq'],
+        gabor_angle_num=config['gabor_angle_num'],
     )
-    features['ocl']     = float(ocl_arr[0])
-    features['ocl_std'] = float(ocl_arr[1])
+    features['gabor'], features['gabor_std'] = gabor
 
-    # ── OFL ───────────────────────────────────────────────────────────────────
-    ofl_arr = compute_ofl(
-        img, mask,
-        blk_size         = config['ocl_ofl_blk_size'],
-        foreground_ratio = fg,
+    # ── OCL ───────────────────────────────────────────────
+    ocl = compute_ocl(img, mask,
+        ocl_ofl_blk_size=config['ocl_ofl_blk_size']
     )
-    features['ofl']     = float(ofl_arr[0])
-    features['ofl_std'] = float(ofl_arr[1])
+    features['ocl'], features['ocl_std'] = ocl
 
-    # ── FDA ───────────────────────────────────────────────────────────────────
-    fda_arr = compute_fda(
-        img, mask,
-        blk_size         = config['shared_blk_size'],
-        v1sz_x           = config['v1sz_x'],    # == shared_blk_size
-        v1sz_y           = config['v1sz_y'],
-        foreground_ratio = fg,
+    # ── OFL ───────────────────────────────────────────────
+    '''
+    ofl = compute_ofl(img, mask,
+        ocl_ofl_blk_size=config['ocl_ofl_blk_size'],
+        foreground_ratio=fg
+    )'''
+    
+    ofl = compute_ofl(img, mask, shared_blk_size=config['shared_blk_size'],foreground_ratio=fg)
+    ofl = np.array(ofl).flatten()
+
+    features['ofl'] = np.nanmean(ofl) if ofl.size > 0 else 0.0
+    features['ofl_std'] = np.nanstd(ofl) if ofl.size > 0 else 0.0
+    
+    
+
+    # ── FDA ───────────────────────────────────────────────
+    fda = compute_fda(img, mask,
+        shared_blk_size=config['shared_blk_size'],
+        v1sz_x=config['v1sz_x'],
+        v1sz_y=config['v1sz_y']
     )
-    features['fda']     = float(fda_arr[0])
-    features['fda_std'] = float(fda_arr[1])
+    features['fda'], features['fda_std'] = fda
 
-    # ── LCS ───────────────────────────────────────────────────────────────────
-    lcs_arr = compute_lcs(
-        img, mask,
-        blk_size         = config['shared_blk_size'],
-        v1sz_x           = config['v1sz_x'],
-        v1sz_y           = config['v1sz_y'],
-        foreground_ratio = fg,
+    # ── LCS ───────────────────────────────────────────────
+    lcs = compute_lcs(img, mask,
+        shared_blk_size=config['shared_blk_size'],
+        v1sz_x=config['v1sz_x'],
+        v1sz_y=config['v1sz_y'],
+        foreground_ratio=fg
     )
-    features['lcs']     = float(lcs_arr[0])
-    features['lcs_std'] = float(lcs_arr[1])
+    features['lcs'], features['lcs_std'] = lcs
 
-    # ── RVU ───────────────────────────────────────────────────────────────────
-    rvu_arr = compute_rvu(
-        img, mask,
-        blk_size         = config['shared_blk_size'],
-        v1sz_x           = config['v1sz_x'],
-        v1sz_y           = config['v1sz_y'],
-        foreground_ratio = fg,
+    # ── RVU ───────────────────────────────────────────────
+    rvu = compute_rvu(img, mask,
+        shared_blk_size=config['shared_blk_size'],
+        v1sz_x=config['v1sz_x'],
+        v1sz_y=config['v1sz_y']
     )
-    features['rvu']     = float(rvu_arr[0])
-    features['rvu_std'] = float(rvu_arr[1])
+    features['rvu'], features['rvu_std'] = rvu
 
-    # ── RPS (placeholder — uncomment and adapt when ready) ───────────────────
-    rps_arr= compute_rps(img)
-    features['rps'] = float(rps_arr)   # remove once rps is wired in
+    # ── RPS ───────────────────────────────────────────────
+    rps = compute_rps(img, mask)
+    features['rps'], features['rps_std'] = rps
 
-    # ── Global stats (no hyperparameters) ────────────────────────────────────
-    features['mean'] = float(img.mean())
-    features['std']  = float(img.std())
+    # ── Global stats ──────────────────────────────────────
+    mean = compute_mean(img, mask)
+    std  = compute_std(img, mask)
+
+    features['mean'], features['mean_std'] = mean
+    features['std'],  features['std_std']  = std
+
+    # ── NEW FEATURES ──────────────────────────────────────
+    rdi = compute_rdi(img, mask, shared_blk_size=config['shared_blk_size'])
+    features['rdi'], features['rdi_std'] = rdi
+
+    s3pg = compute_s3pg(img, mask, shared_blk_size=config['shared_blk_size'])
+    features['s3pg'], features['s3pg_std'] = s3pg
+
+    sep = compute_sep(img, mask, shared_blk_size=config['shared_blk_size'])
+    features['sep'], features['sep_std'] = sep
+
+    mow = compute_mow(img, mask, shared_blk_size=config['shared_blk_size'])
+    features['mow'], features['mow_std'] = mow
+
+    acut = compute_acut(img, mask, shared_blk_size=config['shared_blk_size'])
+    features['acut'], features['acut_std'] = acut
+
+    sf = compute_sf(img, mask, shared_blk_size=config['shared_blk_size'])
+    features['sf'], features['sf_std'] = sf
 
     return features
 
 
 def extract_dataset(
-    pairs:  List[Tuple[np.ndarray, np.ndarray]],
+    pairs: List[Tuple[np.ndarray, np.ndarray]],
     config: dict,
     n_jobs: int = -1,
 ) -> pd.DataFrame:
-    """
-    Extract features for all (img, mask) pairs in parallel.
 
-    Parameters
-    ----------
-    pairs  : list of (img, mask) tuples from preprocessor.load_dataset()
-    config : hyperparameter config dict from build_config()
-    n_jobs : parallelism (-1 = all cores, 1 = serial for debugging)
-
-    Returns
-    -------
-    pd.DataFrame with columns = FEATURE_COLS, one row per image
-    """
     rows = Parallel(n_jobs=n_jobs, prefer='threads')(
         delayed(extract_one)(img, mask, config)
         for img, mask in pairs
@@ -165,19 +151,16 @@ def extract_dataset(
 
     df = pd.DataFrame(rows)
 
-    # Ensure canonical column order, add missing cols as NaN
     for col in FEATURE_COLS:
         if col not in df.columns:
-            print(f"Warning: feature '{col}' missing — check script return format")
+            print(f"Warning: missing feature '{col}'")
             df[col] = np.nan
 
     df = df[FEATURE_COLS]
 
-    # Clean NaN / Inf that can arise from empty foreground blocks
-    n_bad = df.isnull().sum().sum() + np.isinf(df.values).sum()
-    if n_bad > 0:
-        print(f"Warning: {int(n_bad)} NaN/Inf values — replacing with column median")
-        df = df.replace([np.inf, -np.inf], np.nan)
+    # Clean NaNs
+    df = df.replace([np.inf, -np.inf], np.nan)
+    if df.isnull().sum().sum() > 0:
         df = df.fillna(df.median())
 
     return df

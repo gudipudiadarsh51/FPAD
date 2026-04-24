@@ -17,51 +17,128 @@ from typing import List, Tuple
 
 SUPPORTED_EXTENSIONS = {'.png', '.bmp', '.jpg', '.jpeg', '.tiff', '.tif'}
 
-def extract_foreground(img: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    '''
-    Extract the fingerprint foreground from the background using otsu thresholding and 
-    morpholigical cleaning.'''
-     
-     #ensure greyscale
-    if img.dtype != np.uint8:
-        img = img.astype(np.uint8)
-    
-    # Otsu thresholding
-    _, th = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+import cv2
+import numpy as np
+from afqa_toolbox.features import FeatStats
 
-    # Ensure ridges are foreground (not background)
-    if np.mean(img[th == 255]) > np.mean(img[th == 0]):
-        th = cv2.bitwise_not(th)
+import cv2
+import numpy as np
+from afqa_toolbox.features import FeatStats
 
-    mask= (th>0).astype(np.uint8)
 
-    #mopholigical cleaning
-    kernel=np.ones((7,7),np.uint8)
-    mask = cv2.morphologyEx(mask,cv2.MORPH_CLOSE,kernel)
-    mask = cv2.morphologyEx(mask,cv2.MORPH_OPEN,kernel)
+import cv2
+import numpy as np
+from afqa_toolbox.features import FeatStats
 
-    #Keep largest connected component
-    num_labels, labels, stats,_=cv2.connectedComponentsWithStats(mask, connectivity=8)
 
-    if num_labels>1:
-        largest_label = 1+np.argmax(stats[1:, cv2.CC_STAT_AREA])
-        mask=(labels ==largest_label).astype(np.uint8)
+def extract_foreground_afqa(
+    img: np.ndarray,
+    blk_size: int = 32,
+    min_std: float = 13,
+    min_size: int = 128,
+):
+    """
+    Robust AFQA-compatible foreground extraction.
 
-    #apply mask to image
-    foreground = img*mask
+    Steps:
+    1. Normalize
+    2. AFQA std-based mask
+    3. Morphological cleaning
+    4. Largest component
+    5. Crop foreground
+    6. Enforce minimum size
+    7. Pad to block-size multiple (CRITICAL)
 
-    #tight crop
-    ys,xs=np.where(mask==1)
+    Returns:
+        foreground (uint8), mask (uint8)
+    """
 
-    if len(ys) ==0 or len(xs) ==0:
-        #the foreground is detected
-        return img, mask
-    
-    
+    # ── Normalize ─────────────────────────────────────
+    img = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+
+    # ── Local statistics (AFQA style) ─────────────────
+    dummy_mask = np.ones_like(img, dtype=np.uint8)
+    _, stds = FeatStats(blk_size).stats(img, dummy_mask)
+
+    # ── Threshold std → foreground mask ───────────────
+    _, mask_small = cv2.threshold(stds, min_std, 1, cv2.THRESH_BINARY)
+
+    # ── Resize mask back ─────────────────────────────
+    mask = cv2.resize(
+        mask_small,
+        (img.shape[1], img.shape[0]),
+        interpolation=cv2.INTER_NEAREST
+    ).astype(np.uint8)
+
+    # ── Morphological cleaning ───────────────────────
+    kernel = np.ones((5, 5), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+
+    # ── Keep largest connected component ─────────────
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+
+    if num_labels > 1:
+        largest = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
+        mask = (labels == largest).astype(np.uint8)
+
+    # ── Apply mask ───────────────────────────────────
+    foreground = img * mask
+
+    # ── Crop to foreground bounding box ──────────────
+    ys, xs = np.where(mask == 1)
+
+    if len(ys) > 0 and len(xs) > 0:
+        ymin, ymax = ys.min(), ys.max()
+        xmin, xmax = xs.min(), xs.max()
+
+        foreground = foreground[ymin:ymax+1, xmin:xmax+1]
+        mask = mask[ymin:ymax+1, xmin:xmax+1]
+
+    # ── Ensure minimum size (prevents AFQA crashes) ──
+    h, w = foreground.shape
+
+    if h < min_size or w < min_size:
+        new_size = max(min_size, max(h, w))
+
+        foreground = cv2.resize(
+            foreground,
+            (new_size, new_size),
+            interpolation=cv2.INTER_LINEAR
+        )
+
+        mask = cv2.resize(
+            mask,
+            (new_size, new_size),
+            interpolation=cv2.INTER_NEAREST
+        )
+
+    # ── Pad to multiple of block size (CRITICAL FIX) ─
+    h, w = foreground.shape
+
+    new_h = ((h + blk_size - 1) // blk_size) * blk_size
+    new_w = ((w + blk_size - 1) // blk_size) * blk_size
+
+    pad_h = new_h - h
+    pad_w = new_w - w
+
+    foreground = cv2.copyMakeBorder(
+        foreground,
+        0, pad_h,
+        0, pad_w,
+        cv2.BORDER_CONSTANT,
+        value=0
+    )
+
+    mask = cv2.copyMakeBorder(
+        mask,
+        0, pad_h,
+        0, pad_w,
+        cv2.BORDER_CONSTANT,
+        value=0
+    )
 
     return foreground, mask
-
-    
 
 
 def load_image(path: str) -> np.ndarray:
@@ -129,7 +206,7 @@ def load_dataset(root_dir: str, mask_fn) -> Tuple[List[Tuple], np.ndarray, List[
                 if  mask_fn is not None:
                     mask = mask_fn(img)
                 else:
-                    _,mask=extract_foreground(img)
+                    _,mask=extract_foreground_afqa(img)
 
                 # Validate mask
                 if mask.shape != img.shape:
